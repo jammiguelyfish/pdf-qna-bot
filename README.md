@@ -115,19 +115,19 @@ python ingest.py
 ```
 Found 3 PDF(s): research_paper.pdf, user_manual.pdf, report.pdf
 
-🔄 Loading PDFs...
-✅ Loaded 45 page(s) from PDF(s)
+Loading PDFs...
+Loaded 45 page(s) from PDF(s)
 
-🔄 Splitting documents into chunks...
-✅ Created 127 chunks
+Splitting documents into chunks...
+Created 127 chunks
 
-🔄 Initializing embeddings model (all-MiniLM-L6-v2)...
-✅ Embeddings model loaded
+Initializing embeddings model (all-MiniLM-L6-v2)...
+Embeddings model loaded
 
-🔄 Creating/updating Chroma vector database at './chroma_db'...
-✅ Vector database created and persisted
+Creating/updating Chroma vector database at './chroma_db'...
+Vector database created and persisted
 
-🎉 Ingestion complete! Processed 3 PDF(s) into 127 searchable chunks.
+Ingestion complete! Processed 3 PDF(s) into 127 searchable chunks.
 ```
 
 ### Step 3: Ask Questions
@@ -239,3 +239,4 @@ This is a simple educational project. Feel free to fork and modify for your need
 - [Chroma Documentation](https://docs.trychroma.com/)
 - [Ollama Documentation](https://ollama.com/docs)
 - [SentenceTransformers](https://www.sbert.net/)
+
