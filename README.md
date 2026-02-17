@@ -219,24 +219,7 @@ pdf_qa_bot/
 └── chroma_db/         # Vector database (created after ingestion)
 ```
 
-## Privacy & Security
-
-- **100% Local**: All data stays on your machine
-- **No API calls**: No data sent to external services
-- **Offline capable**: Works without internet (after initial setup)
 
 ## License
 
 This project uses open-source components. Check individual library licenses for details.
-
-## Contributing
-
-This is a simple educational project. Feel free to fork and modify for your needs!
-
-## Learn More
-
-- [LangChain Documentation](https://python.langchain.com/)
-- [Chroma Documentation](https://docs.trychroma.com/)
-- [Ollama Documentation](https://ollama.com/docs)
-- [SentenceTransformers](https://www.sbert.net/)
-
