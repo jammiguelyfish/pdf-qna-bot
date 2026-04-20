@@ -4,28 +4,22 @@ A local, CLI-based PDF Question-Answering application using Retrieval Augmented 
 
 ## Features
 
-- **100% Local**: No cloud APIs, all processing happens on your machine
+- **100% Local**
 - **Free & Open Source**: Uses only open-source tools and models
-- **Hallucination Prevention**: Strict RAG prompting ensures answers come only from documents
 - **Persistent Storage**: Vector embeddings stored locally in Chroma DB
 - **Source Attribution**: Shows which PDF and page number the answer came from
 
 ## Tech Stack
 
 - **Python 3.10+**
-- **LangChain**: RAG orchestration
-- **Chroma**: Local vector database
+- **LangChain**
+- **Chroma**
 - **SentenceTransformers**: Embeddings (all-MiniLM-L6-v2)
 - **Mistral**: LLM via Ollama (local inference)
 
 ## Prerequisites
 
 ### 1. Python 3.10 or higher
-
-Check your Python version:
-```bash
-python --version
-```
 
 ### 2. Ollama
 
@@ -93,7 +87,7 @@ Place your PDF files in the `data/pdfs/` directory:
 data/pdfs/
   ├── research_paper.pdf
   ├── user_manual.pdf
-  └── report.pdf
+  └── sales_report.pdf
 ```
 
 ### Step 2: Ingest PDFs
