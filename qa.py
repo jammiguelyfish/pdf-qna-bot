@@ -10,10 +10,12 @@ from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
+from retrieval import build_hybrid_retriever
+
 # Configuration
 CHROMA_DIR = "./chroma_db"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-LLM_MODEL = "mistral"
+LLM_MODEL = os.environ.get("LLM_MODEL", "mistral")
 TOP_K = 4
 
 
@@ -84,7 +86,7 @@ Answer:"""
     qa_chain = RetrievalQA.from_chain_type(
         llm=llm,
         chain_type="stuff",
-        retriever=vectorstore.as_retriever(search_kwargs={"k": TOP_K}),
+        retriever=build_hybrid_retriever(vectorstore, TOP_K),
         return_source_documents=True,
         chain_type_kwargs={"prompt": PROMPT}
     )
@@ -127,6 +129,8 @@ Answer:"""
                 # Extract metadata
                 source = doc.metadata.get('source', 'Unknown')
                 page = doc.metadata.get('page', 'N/A')
+                if isinstance(page, int):
+                    page += 1  # PyPDF page numbers are 0-indexed
                 
                 # Clean up source path (show just filename)
                 source_name = os.path.basename(source)
