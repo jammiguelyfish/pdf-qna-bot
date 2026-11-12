@@ -8,6 +8,7 @@ A local, CLI-based PDF Question-Answering application using Retrieval Augmented 
 - **Free & Open Source**: Uses only open-source tools and models
 - **Persistent Storage**: Vector embeddings stored locally in Chroma DB
 - **Source Attribution**: Shows which PDF and page number the answer came from
+- **Hybrid Retrieval**: Embedding search fused with BM25 keyword search, so exact names and date spellings ("Busan", "January 15" vs "Jan 15") are found too
 
 ## Tech Stack
 
@@ -15,6 +16,7 @@ A local, CLI-based PDF Question-Answering application using Retrieval Augmented 
 - **LangChain**
 - **Chroma**
 - **SentenceTransformers**: Embeddings (all-MiniLM-L6-v2)
+- **rank-bm25**: Keyword retrieval, fused with the embeddings
 - **Mistral**: LLM via Ollama (local inference)
 
 ## Prerequisites
@@ -75,6 +77,7 @@ This installs:
 - `chromadb` (vector database)
 - `sentence-transformers` (embeddings)
 - `pypdf` (PDF parsing)
+- `rank-bm25` (keyword search for hybrid retrieval)
 
 ## Usage
 
@@ -132,39 +135,69 @@ Run the Q&A script to start asking questions:
 python qa.py
 ```
 
-**Example interaction:**
+**Example interaction** (three sample travel-itinerary PDFs, run with a small local model via `LLM_MODEL=qwen2.5:1.5b-instruct python qa.py`):
 
 ```
 Loading vector database...
 Vector database loaded
-Connecting to Ollama (mistral)...
+Connecting to Ollama (qwen2.5:1.5b-instruct)...
 LLM ready
 
 ============================================================
 PDF Q&A Bot Ready! (Type 'exit' or 'quit' to stop)
 ============================================================
 
-Your Question: What is the main conclusion of the research paper?
-
-Searching documents and generating answer...
+Your Question: Where are we going on January 15?
 
 Answer:
 ------------------------------------------------------------
-The main conclusion is that the proposed method improves 
-accuracy by 15% compared to baseline approaches while 
-maintaining computational efficiency.
+Sagada → Baguio → Manila
 ------------------------------------------------------------
 
 Sources:
-  [1] research_paper.pdf (Page 12)
-  [2] research_paper.pdf (Page 11)
+  [1] Philippines 21-Day Travel Itinerary.pdf (Page 4)
+  [2] Philippines 21-Day Travel Itinerary.pdf (Page 3)
+  [3] Philippines 21-Day Travel Itinerary.pdf (Page 3)
+  [4] Philippines 21-Day Travel Itinerary.pdf (Page 2)
 
 ============================================================
+
+Your Question: How many nights are we staying in Busan?
+
+Answer:
+------------------------------------------------------------
+3 nights
+------------------------------------------------------------
+
+Sources:
+  [1] Philippines 21-Day Travel Itinerary.pdf (Page 1)
+  [2] Philippines 21-Day Travel Itinerary.pdf (Page 3)
+  [3] South Korea 14-Day Travel Itinerary.pdf (Page 1)
+  [4] Philippines 21-Day Travel Itinerary.pdf (Page 3)
+
+============================================================
+
+Your Question: What is the weather like in Paris?
+
+Answer:
+------------------------------------------------------------
+I don't know based on the provided document.
+------------------------------------------------------------
 
 Your Question: exit
 
 Goodbye!
 ```
+
+Questions the documents cannot answer get the fixed "I don't know" reply instead of a guess.
+
+## How it works
+
+1. `ingest.py` loads the PDFs, splits them into overlapping chunks, embeds them and stores them in Chroma.
+2. `retrieval.py` builds a **hybrid retriever**: the question is matched against the chunks by embedding similarity *and* by BM25 keyword score, and the two rankings are merged with reciprocal rank fusion. Month names are normalized (`January` becomes `jan`) so a question matches how dates are written in the PDF.
+3. `qa.py` passes the top chunks to the local LLM with a strict prompt that forbids using outside knowledge, then prints the answer and its sources.
+
+Why hybrid? On the sample itineraries, embeddings alone put the right chunk in the top 4 for only 4 of 8 test questions (they missed "Busan" and "January 15"); the hybrid retriever found it for all 8.
 
 ## Configuration
 
@@ -176,8 +209,8 @@ You can modify these settings in the scripts:
 - `EMBEDDING_MODEL = "all-MiniLM-L6-v2"` - Embedding model
 
 ### `qa.py`
-- `LLM_MODEL = "mistral"` - Ollama model name
-- `TOP_K = 4` - Number of chunks to retrieve
+- `LLM_MODEL = "mistral"` - Ollama model name (override with the `LLM_MODEL` environment variable)
+- `TOP_K = 4` - Number of chunks passed to the LLM after fusion
 
 ## Troubleshooting
 
