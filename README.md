@@ -1,5 +1,7 @@
 # PDF Q&A Bot (RAG Lite)
 
+[![CI](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml)
+
 A local, CLI-based PDF Question-Answering application using Retrieval Augmented Generation (RAG). This bot ingests PDF documents, stores embeddings locally, and answers questions strictly from the provided documents to avoid hallucinations.
 
 ## Features
