@@ -19,6 +19,46 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "mistral")
 TOP_K = 4
 
 
+# Strict RAG prompt to prevent hallucinations
+PROMPT_TEMPLATE = """You are a helpful assistant that answers questions strictly based on the provided context.
+
+Context from documents:
+{context}
+
+User Question: {question}
+
+Instructions:
+- Answer ONLY using information from the context above
+- Do NOT use any external knowledge
+- If the answer is not in the context, respond with exactly: "I don't know based on the provided document."
+- Be concise and direct
+
+Answer:"""
+
+
+def load_vectorstore():
+    """Open the persisted Chroma store (embeddings must match ingestion)."""
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL,
+        model_kwargs={'device': 'cpu'},
+        encode_kwargs={'normalize_embeddings': True}
+    )
+    return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+
+
+def build_chain(llm, retriever):
+    """The RetrievalQA chain the bot answers with."""
+    return RetrievalQA.from_chain_type(
+        llm=llm,
+        chain_type="stuff",
+        retriever=retriever,
+        return_source_documents=True,
+        chain_type_kwargs={"prompt": PromptTemplate(
+            template=PROMPT_TEMPLATE, input_variables=["context", "question"]
+        )},
+    )
+
+
 def main():
     """
     Main Q&A pipeline:
@@ -37,18 +77,7 @@ def main():
     
     print("Loading vector database...")
     
-    # Initialize embeddings (must use same model as ingestion)
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
-    
-    # Load persisted Chroma vector store
-    vectorstore = Chroma(
-        persist_directory=CHROMA_DIR,
-        embedding_function=embeddings
-    )
+    vectorstore = load_vectorstore()
     
     print("Vector database loaded")
     
@@ -61,36 +90,9 @@ def main():
     
     print("LLM ready")
     
-    # Define strict RAG prompt to prevent hallucinations
-    prompt_template = """You are a helpful assistant that answers questions strictly based on the provided context.
-
-Context from documents:
-{context}
-
-User Question: {question}
-
-Instructions:
-- Answer ONLY using information from the context above
-- Do NOT use any external knowledge
-- If the answer is not in the context, respond with exactly: "I don't know based on the provided document."
-- Be concise and direct
-
-Answer:"""
-    
-    PROMPT = PromptTemplate(
-        template=prompt_template,
-        input_variables=["context", "question"]
-    )
-    
     # Create retrieval QA chain
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=build_hybrid_retriever(vectorstore, TOP_K),
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": PROMPT}
-    )
-    
+    qa_chain = build_chain(llm, build_hybrid_retriever(vectorstore, TOP_K))
+
     print("\n" + "="*60)
     print("PDF Q&A Bot Ready! (Type 'exit' or 'quit' to stop)")
     print("="*60 + "\n")

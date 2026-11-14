@@ -47,18 +47,23 @@ class _TopKRetriever(BaseRetriever):
         return self.base.get_relevant_documents(query)[: self.k]
 
 
+def build_bm25_retriever(vectorstore, k: int = 4) -> BM25Retriever:
+    """Keyword-only retriever over every chunk stored in ``vectorstore``."""
+    data = vectorstore.get(include=["documents", "metadatas"])
+    docs = [
+        Document(page_content=text, metadata=meta)
+        for text, meta in zip(data["documents"], data["metadatas"])
+    ]
+    return BM25Retriever.from_documents(docs, k=k, preprocess_func=tokenize)
+
+
 def build_hybrid_retriever(vectorstore, k: int = 4, candidates: int = 10) -> BaseRetriever:
     """Fuse dense and BM25 rankings (reciprocal rank fusion), return the top ``k``.
 
     Each retriever contributes ``candidates`` chunks so that a chunk ranked 5th
     by one of them can still win after fusion.
     """
-    data = vectorstore.get(include=["documents", "metadatas"])
-    docs = [
-        Document(page_content=text, metadata=meta)
-        for text, meta in zip(data["documents"], data["metadatas"])
-    ]
-    bm25 = BM25Retriever.from_documents(docs, k=candidates, preprocess_func=tokenize)
+    bm25 = build_bm25_retriever(vectorstore, k=candidates)
     dense = _MonthNormalizedRetriever(
         base=vectorstore.as_retriever(search_kwargs={"k": candidates})
     )
