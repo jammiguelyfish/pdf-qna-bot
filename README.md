@@ -1,203 +1,147 @@
-# PDF Q&A Bot (RAG Lite)
+# PDF Q&A: chat with your documents
 
 [![CI](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml)
 
-A local, CLI-based PDF Question-Answering application using Retrieval Augmented Generation (RAG). This bot ingests PDF documents, stores embeddings locally, and answers questions strictly from the provided documents to avoid hallucinations.
+A full-stack, fully local app for asking questions about your own PDFs. Sign up, upload documents, and chat with them. Answers come only from *your* documents, with the file and page they came from.
 
-## Features
+- **Backend:** Django + Django REST Framework, session auth, SQLite
+- **Frontend:** React + TypeScript + Vite + Tailwind
+- **RAG:** hybrid retrieval (embeddings fused with BM25 keyword search) over Chroma, answered by a local LLM through Ollama
+- **Private by design:** every user gets their own vector collection, and both retrievers are scoped to it
+- **No paid APIs, nothing leaves your machine**
 
-- **100% Local**
-- **Free & Open Source**: Uses only open-source tools and models
-- **Persistent Storage**: Vector embeddings stored locally in Chroma DB
-- **Source Attribution**: Shows which PDF and page number the answer came from
-- **Hybrid Retrieval**: Embedding search fused with BM25 keyword search, so exact names and date spellings ("Busan", "January 15" vs "Jan 15") are found too
+![Chat with sources](docs/images/chat.png)
 
-## Tech Stack
+## What you can do
 
-- **Python 3.10+**
-- **LangChain**
-- **Chroma**
-- **SentenceTransformers**: Embeddings (all-MiniLM-L6-v2)
-- **rank-bm25**: Keyword retrieval, fused with the embeddings
-- **Mistral**: LLM via Ollama (local inference)
+- **Upload PDFs** by drag-and-drop. They are indexed in the background, with live status (queued, processing, ready, failed with a reason).
+- **Get warned about duplicates.** Uploading the same file again, even under a different name, is refused with a message naming the existing copy. Uploading a *different* file with an existing name asks whether to replace it.
+- **Chat** with your documents. Each answer lists its sources (file and page); click one to see the passage.
+- **Keep conversations** and delete them, or delete a document and all its indexed content.
+- Questions the documents can't answer get a fixed "I don't know" reply instead of a guess.
 
-## Prerequisites
+![Duplicate warning](docs/images/duplicate-warning.png)
 
-### 1. Python 3.10 or higher
+![Replace prompt](docs/images/replace-prompt.png)
 
-### 2. Ollama
+## Architecture
 
-Ollama must be installed and running to use the Mistral model locally.
-
-**Install Ollama:**
-- **Windows/Mac/Linux**: Download from [https://ollama.com/download](https://ollama.com/download)
-
-**Verify Ollama is running:**
-```bash
-ollama --version
+```
+React SPA ──/api──▶ Django REST API ──▶ SQLite (users, documents, conversations)
+ (Vite)               │
+                      ├─ upload ──▶ file on disk + DB row (status: queued)
+                      │                 │
+                      │                 ▼
+                      │          background worker thread
+                      │          read PDF → chunk → embed → Chroma
+                      │          collection "user_<id>"  (one per user)
+                      │
+                      └─ chat ───▶ hybrid retriever (dense + BM25, both limited to
+                                   the user's ready documents) ──▶ Ollama LLM
+                                   ──▶ answer + cited sources
 ```
 
-**Pull the Mistral model:**
-```bash
-ollama pull mistral
-```
+The retrieval core (`ingestion.py`, `store.py`, `retrieval.py`, `qa.py`) has no Django dependency, so the original command-line tool still works and the web app reuses exactly the same code. Django's own apps are `accounts`, `documents` and `chat`.
 
-This downloads the Mistral model (~4.1GB). It only needs to be done once.
+## Quick start
 
-## Setup
-
-### 1. Clone or navigate to project directory
+You need Python 3.11+, Node 20+, and [Ollama](https://ollama.com/download) with a model pulled.
 
 ```bash
-cd pdf_qa_bot
+ollama pull mistral            # or any model; set LLM_MODEL to use another
 ```
 
-### 2. Create a virtual environment (recommended)
+**Backend**
 
 ```bash
 python -m venv venv
-```
-
-**Activate the virtual environment:**
-- **Windows**:
-  ```bash
-  venv\Scripts\activate
-  ```
-- **Mac/Linux**:
-  ```bash
-  source venv/bin/activate
-  ```
-
-### 3. Install dependencies
-
-```bash
+venv\Scripts\activate          # macOS/Linux: source venv/bin/activate
 pip install -r requirements.txt
+
+# development mode (PowerShell: $env:DJANGO_DEBUG = "1")
+export DJANGO_DEBUG=1
+export LLM_MODEL=mistral       # the Ollama model that answers
+python manage.py migrate
+python manage.py runserver
 ```
 
-This installs:
-- `langchain` and `langchain-community`
-- `chromadb` (vector database)
-- `sentence-transformers` (embeddings)
-- `pypdf` (PDF parsing)
-- `rank-bm25` (keyword search for hybrid retrieval)
-
-## Usage
-
-### Step 1: Add PDFs
-
-Place your PDF files in the `data/pdfs/` directory:
+**Frontend** (second terminal)
 
 ```bash
-# Example structure
-data/pdfs/
-  ├── research_paper.pdf
-  ├── user_manual.pdf
-  └── sales_report.pdf
+cd frontend
+npm install
+npm run dev                    # http://localhost:5173, proxies /api to Django
 ```
 
-### Step 2: Ingest PDFs
+Open http://localhost:5173, create an account, upload a PDF, and ask a question. The first upload downloads the small embedding model (all-MiniLM-L6-v2) once.
 
-Run the ingestion script to process PDFs and create the vector database:
+> Outside development set `DJANGO_SECRET_KEY` (the server refuses to start without it) and `DJANGO_ALLOWED_HOSTS`. Set `ALLOW_REGISTRATION=0` to close sign-up.
+
+## How uploads behave
+
+Ingestion is idempotent and restartable. Every stored chunk carries the file's content hash, how many chunks the file produced, and the embedding model used, so the index can always tell what is complete.
+
+| Situation | What happens |
+|---|---|
+| The same document uploaded twice | Refused with `409 duplicate_content` and the name of the existing copy. Detected by SHA-256 of the file's bytes, so a renamed copy is caught too. |
+| A different file with an existing name | `409 name_exists`; the UI asks. On "Replace" the old row, file and **all its embeddings are deleted** before the new one is indexed. |
+| An existing document is edited | It has a new hash, so it is a different document: the replace flow above, or in the CLI an automatic update. |
+| Outdated embeddings | Removed with the document, or by the CLI sync when a file disappears or changes. Chunk ids derive from the hash, so re-indexing the same content overwrites instead of duplicating. |
+| Embedding fails halfway | Partly written chunks are removed again and the document is marked **failed** with a reason; nothing half-indexed stays behind. If the process is killed before cleanup, the document is picked up again after restart. A failed file can be re-uploaded. |
+| One unreadable, scanned or password-protected PDF | Reported as failed with a clear message; it never blocks other files. |
+| Deleted while still being indexed | The worker notices and removes the chunks it just wrote. |
+| Embedding model changed | Chunks record their model, so the CLI re-embeds instead of mixing incompatible vectors. |
+
+(Before this change the CLI deleted the whole index *before* embedding, so a failure left no database at all, and the same PDF under two names was indexed twice. Both were reproduced and are covered by tests now.)
+
+## Privacy and isolation
+
+- Each user's chunks live in a Chroma collection of their own (`user_<id>`). Dense search, the BM25 keyword index, deletion and retrieval all operate on that single collection.
+- Retrieval is further restricted to the ids of the user's **ready** documents, so chunks left behind by a deleted or half-finished document can never surface (tested with a deliberately planted orphan chunk).
+- Documents and conversations are looked up through the signed-in user, so another user's id returns `404`, never `403`, and cannot be read, deleted or written into.
+- Files are stored under a random name in a per-user folder; the original filename is only a display label (path components and control characters are stripped).
+- The keyword retriever is the easy place to leak: it is built from the collection's contents, not from a filtered query. It is built from the same user-scoped, ready-only set, and a test asks a question that only another user's document can answer.
+- Passwords use Django's hashers and validators. Writes require a CSRF token; the session cookie is HttpOnly and SameSite=Lax (and Secure outside development).
+
+## API
+
+All endpoints require a session except `csrf`, `register` and `login`. Writes need the `X-CSRFToken` header (the client fetches the cookie from `/api/auth/csrf/`).
+
+| Method and path | |
+|---|---|
+| `GET /api/auth/csrf/` | sets the CSRF cookie |
+| `POST /api/auth/register/` `login/` `logout/`, `GET me/` | accounts (all under `/api/auth/`) |
+| `GET /api/documents/` | your documents with status, pages, size |
+| `POST /api/documents/` | multipart upload (`file`, optional `replace=true`); `201`, or `409` with `code` and the `existing` document |
+| `GET` / `DELETE /api/documents/{id}/` | one document / delete it and its embeddings |
+| `POST /api/chat/` | `{question, conversation?}` returns the conversation and the two new messages, with `sources` |
+| `GET /api/conversations/`, `GET` / `DELETE /api/conversations/{id}/` | history |
+
+Limits: PDFs only (checked by extension *and* the `%PDF-` header), 25 MB per file (`MAX_UPLOAD_MB`), questions up to 1000 characters, and per-user rate limits on chat (60/min) and uploads (60/hour). If Ollama is down, chat answers `503` with a readable message and saves nothing.
+
+## Command-line tool
+
+The original CLI still works, with the same fixes:
 
 ```bash
-python ingest.py
+# put PDFs in data/pdfs/
+python ingest.py        # makes the index match the folder
+python qa.py            # interactive Q&A
 ```
 
-**What it does:**
-- Loads all PDFs from `data/pdfs/`
-- Splits text into chunks (1000 chars, 200 overlap)
-- Generates embeddings using SentenceTransformers
-- Stores vectors in `chroma_db/` directory
-- Safe to re-run (overwrites existing database)
-
-**Expected output:**
-```
-Found 3 PDF(s): research_paper.pdf, user_manual.pdf, report.pdf
-
-Loading PDFs...
-Loaded 45 page(s) from PDF(s)
-
-Splitting documents into chunks...
-Created 127 chunks
-
-Initializing embeddings model (all-MiniLM-L6-v2)...
-Embeddings model loaded
-
-Creating/updating Chroma vector database at './chroma_db'...
-Vector database created and persisted
-
-Ingestion complete! Processed 3 PDF(s) into 127 searchable chunks.
-```
-
-### Step 3: Ask Questions
-
-Run the Q&A script to start asking questions:
-
-```bash
-python qa.py
-```
-
-**Example interaction** (three sample travel-itinerary PDFs, run with a small local model via `LLM_MODEL=qwen2.5:1.5b-instruct python qa.py`):
+`ingest.py` is now incremental: new files are added, edited files replace their old chunks, deleted files are removed, identical copies are skipped, an interrupted run is detected and finished, and a bad PDF is reported without stopping the rest. A second run with nothing changed does no embedding work.
 
 ```
-Loading vector database...
-Vector database loaded
-Connecting to Ollama (qwen2.5:1.5b-instruct)...
-LLM ready
+Syncing './data/pdfs' with './chroma_db'...
 
-============================================================
-PDF Q&A Bot Ready! (Type 'exit' or 'quit' to stop)
-============================================================
+  added: Philippines 21-Day Travel Itinerary.pdf, South Korea 14-Day Travel Itinerary.pdf, Tokyo 14-Day Travel Itinerary.pdf
 
-Your Question: Where are we going on January 15?
-
-Answer:
-------------------------------------------------------------
-Sagada → Baguio → Manila
-------------------------------------------------------------
-
-Sources:
-  [1] Philippines 21-Day Travel Itinerary.pdf (Page 4)
-  [2] Philippines 21-Day Travel Itinerary.pdf (Page 3)
-  [3] Philippines 21-Day Travel Itinerary.pdf (Page 3)
-  [4] Philippines 21-Day Travel Itinerary.pdf (Page 2)
-
-============================================================
-
-Your Question: How many nights are we staying in Busan?
-
-Answer:
-------------------------------------------------------------
-3 nights
-------------------------------------------------------------
-
-Sources:
-  [1] Philippines 21-Day Travel Itinerary.pdf (Page 1)
-  [2] Philippines 21-Day Travel Itinerary.pdf (Page 3)
-  [3] South Korea 14-Day Travel Itinerary.pdf (Page 1)
-  [4] Philippines 21-Day Travel Itinerary.pdf (Page 3)
-
-============================================================
-
-Your Question: What is the weather like in Paris?
-
-Answer:
-------------------------------------------------------------
-I don't know based on the provided document.
-------------------------------------------------------------
-
-Your Question: exit
-
-Goodbye!
+Done. The index holds 30 searchable chunks.
 ```
 
-Questions the documents cannot answer get the fixed "I don't know" reply instead of a guess.
+## How retrieval works
 
-## How it works
-
-1. `ingest.py` loads the PDFs, splits them into overlapping chunks, embeds them and stores them in Chroma.
-2. `retrieval.py` builds a **hybrid retriever**: the question is matched against the chunks by embedding similarity *and* by BM25 keyword score, and the two rankings are merged with reciprocal rank fusion. Month names are normalized (`January` becomes `jan`) so a question matches how dates are written in the PDF.
-3. `qa.py` passes the top chunks to the local LLM with a strict prompt that forbids using outside knowledge, then prints the answer and its sources.
+`retrieval.py` builds a **hybrid retriever**: the question is matched against chunks by embedding similarity *and* by BM25 keyword score, and the two rankings are merged with reciprocal rank fusion. Month names are normalized (`January` becomes `jan`) so a question matches how dates are written in the PDF. The top chunks go to the local LLM with a strict prompt that forbids outside knowledge.
 
 Why hybrid? Embeddings alone miss exact names and dates ("Busan", "January 15"). The [Evaluation](#evaluation) below measures how much, and where hybrid does and doesn't help.
 
@@ -218,6 +162,8 @@ python evaluate.py --answers    # also grade the answers (needs Ollama)
 | BM25 (keywords only) | 23/24 (96%) | 0.78 |
 | hybrid (what the bot uses) | 22-23/24 (92-96%) | 0.69-0.73 |
 
+These numbers were re-checked after the ingestion rewrite and are unchanged (17/24, 23/24, 23/24), so the new pipeline chunks documents exactly as before.
+
 **Answers** with `qwen2.5:1.5b-instruct` and the hybrid retriever: 20/24 answerable questions correct, 2/3 unanswerable questions refused. The full report is in [`eval/results.md`](eval/results.md).
 
 What this shows, and what it doesn't:
@@ -225,61 +171,62 @@ What this shows, and what it doesn't:
 - Embeddings alone are the weakest here: they miss exact dates and names, which is most of what people ask about an itinerary.
 - Keyword search alone is as good as the hybrid, and ranks the answer higher. These documents are short and keyword-rich, so that is plausible. Hybrid is kept because it should be more robust when a question is worded differently from the document, but this question set cannot prove that, because BM25 also handled the paraphrased questions. The fusion weights were not tuned on this set.
 - Of the 4 wrong answers to answerable questions, 2 were retrieval misses and 2 were the small model: it garbled a name ("Seoudong Yonggungsa") and answered "I don't know" although the right chunk was retrieved. One unanswerable question (which airline flies Jeju to Seoul) got an answer anyway. A larger model such as Mistral, the default, should do better but was not run here.
-- Small-model answers are not stable either: the order of the retrieved chunks changes between runs, and the 1.5B model answered the Busan question correctly in one run and said "I don't know" in another.
+- Small-model answers are not stable: the order of the retrieved chunks changes between runs, and the 1.5B model answered the Busan question correctly in one run and incorrectly ("2 nights" instead of 3) in another while building the web app. The screenshots above use a question it answers reliably.
 - 27 questions over 3 short PDFs is a sanity check, not a benchmark.
-
 
 ## Configuration
 
-You can modify these settings in the scripts:
+| Environment variable | Default | |
+|---|---|---|
+| `DJANGO_DEBUG` | `0` | `1` for development (also trusts the Vite dev origin for CSRF) |
+| `DJANGO_SECRET_KEY` | none | required unless `DJANGO_DEBUG=1` |
+| `DJANGO_ALLOWED_HOSTS` | `localhost,127.0.0.1` | comma-separated |
+| `ALLOW_REGISTRATION` | `1` | `0` closes sign-up |
+| `LLM_MODEL` / `OLLAMA_BASE_URL` | `mistral` / `http://localhost:11434` | which Ollama model answers |
+| `TOP_K` | `4` | chunks passed to the model |
+| `MAX_UPLOAD_MB` | `25` | per-file limit |
+| `APP_VAR_DIR` | `./var` | database, uploads and vector index |
 
-### `ingest.py`
-- `CHUNK_SIZE = 1000` - Size of text chunks
-- `CHUNK_OVERLAP = 200` - Overlap between chunks
-- `EMBEDDING_MODEL = "all-MiniLM-L6-v2"` - Embedding model
+Chunking (1000 characters, 200 overlap) and the embedding model are constants in `ingestion.py` and `store.py`.
 
-### `qa.py`
-- `LLM_MODEL = "mistral"` - Ollama model name (override with the `LLM_MODEL` environment variable)
-- `TOP_K = 4` - Number of chunks passed to the LLM after fusion
+## Tests
 
-## Troubleshooting
-
-### "Error: Vector database not found"
-- Run `python ingest.py` first to create the database
-
-### "Error: PDF directory does not exist"
-- Make sure you're in the `pdf_qa_bot/` directory when running scripts
-
-### "No PDF files found"
-- Add at least one PDF to `data/pdfs/`
-
-### Ollama connection errors
-- Ensure Ollama is running: `ollama serve`
-- Verify Mistral is installed: `ollama list`
-- Pull Mistral if needed: `ollama pull mistral`
-
-### "I don't know based on the provided document"
-- The answer isn't in your PDFs
-- Try rephrasing your question
-- Add more relevant PDFs and re-run ingestion
-
-## Project Structure
-
-```
-pdf_qa_bot/
-├── ingest.py           # PDF ingestion and embedding script
-├── qa.py               # Question-answering CLI script
-├── retrieval.py        # Hybrid (embeddings + BM25) retriever
-├── evaluate.py         # Retrieval and answer evaluation
-├── eval/               # Question set and latest results
-├── tests/              # Unit tests (run in CI)
-├── requirements.txt    # Python dependencies
-├── README.md          # This file
-├── data/
-│   └── pdfs/          # Place your PDF files here
-└── chroma_db/         # Vector database (created after ingestion)
+```bash
+python -m pytest                 # retrieval, ingestion lifecycle, evaluation
+python manage.py test            # API: accounts, documents, chat, isolation
+cd frontend && npm test          # React: duplicate warning, replace, chat
 ```
 
+The ingestion and API tests run against a real Chroma index in a temporary directory with deterministic fake embeddings and a fake LLM, so they need no model download and run in CI. They cover duplicates, replace, update, removal, a failure halfway through writing, crash recovery, restart recovery, deleting during indexing, and cross-user isolation (documents, collections, chat sources, conversations, and the keyword index).
+
+## Limitations
+
+- **One server process.** Indexing runs on a single background thread, and unfinished documents are re-queued on the next request after a restart. For several workers or servers, use a real queue (Celery or RQ) and a server-based vector store.
+- **Answers are single-turn.** Conversations are saved and shown, but earlier messages are not sent to the model, so a follow-up like "and the next day?" has no context.
+- **No streaming.** The answer appears when the model finishes.
+- **Text PDFs only.** Scanned PDFs are rejected with an explanation; there is no OCR.
+- **The keyword index is rebuilt for every question** from the user's chunks. Fine for a few documents, wasteful for thousands.
+- **Sign-in has no lockout** beyond password validation; chat and upload are rate limited but login attempts are not.
+- **No production deployment config** (container, static file serving, HTTPS) is included yet. The Django dev server and the Vite dev server are what I ran.
+- **Answer quality depends on the model.** A 1.5B model is quick but sometimes wrong, as the evaluation shows.
+- Uploads are limited by the Django process, not a reverse proxy; put one in front for real deployments.
+
+## Project structure
+
+```
+manage.py, config/      Django project and settings
+accounts/               sign-up, sign-in, CSRF
+documents/              upload API, background indexing, per-user collections
+chat/                   conversations, retrieval-augmented answers
+frontend/               React app (documents page, chat page, auth)
+ingestion.py            incremental, restartable PDF indexing (shared)
+store.py                opening the Chroma index (shared)
+retrieval.py            hybrid (embeddings + BM25) retriever (shared)
+qa.py, ingest.py        command-line tools
+evaluate.py, eval/      retrieval and answer evaluation
+tests/                  core unit tests (also each app's tests.py)
+data/pdfs/              three sample itineraries used in the evaluation
+```
 
 ## License
 

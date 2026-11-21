@@ -4,17 +4,15 @@ Loads Chroma vector store, retrieves relevant chunks, and answers questions usin
 """
 
 import os
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
 from langchain_community.llms import Ollama
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
 from retrieval import build_hybrid_retriever
+from store import open_store
 
 # Configuration
 CHROMA_DIR = "./chroma_db"
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 LLM_MODEL = os.environ.get("LLM_MODEL", "mistral")
 TOP_K = 4
 
@@ -38,12 +36,7 @@ Answer:"""
 
 def load_vectorstore():
     """Open the persisted Chroma store (embeddings must match ingestion)."""
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
-    return Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+    return open_store(CHROMA_DIR)
 
 
 def build_chain(llm, retriever):

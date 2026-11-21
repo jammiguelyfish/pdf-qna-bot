@@ -47,9 +47,14 @@ class _TopKRetriever(BaseRetriever):
         return self.base.get_relevant_documents(query)[: self.k]
 
 
-def build_bm25_retriever(vectorstore, k: int = 4) -> BM25Retriever:
-    """Keyword-only retriever over every chunk stored in ``vectorstore``."""
-    data = vectorstore.get(include=["documents", "metadatas"])
+def build_bm25_retriever(vectorstore, k: int = 4, where=None) -> BM25Retriever:
+    """Keyword-only retriever over the chunks stored in ``vectorstore``.
+
+    ``where`` is an optional Chroma metadata filter; it limits which chunks the
+    keyword index is built from, just as it limits the dense search.
+    """
+    kwargs = {"where": where} if where else {}
+    data = vectorstore.get(include=["documents", "metadatas"], **kwargs)
     docs = [
         Document(page_content=text, metadata=meta)
         for text, meta in zip(data["documents"], data["metadatas"])
@@ -57,15 +62,19 @@ def build_bm25_retriever(vectorstore, k: int = 4) -> BM25Retriever:
     return BM25Retriever.from_documents(docs, k=k, preprocess_func=tokenize)
 
 
-def build_hybrid_retriever(vectorstore, k: int = 4, candidates: int = 10) -> BaseRetriever:
+def build_hybrid_retriever(vectorstore, k: int = 4, candidates: int = 10, where=None) -> BaseRetriever:
     """Fuse dense and BM25 rankings (reciprocal rank fusion), return the top ``k``.
 
     Each retriever contributes ``candidates`` chunks so that a chunk ranked 5th
-    by one of them can still win after fusion.
+    by one of them can still win after fusion. ``where`` restricts both
+    retrievers to the same subset of chunks.
     """
-    bm25 = build_bm25_retriever(vectorstore, k=candidates)
+    bm25 = build_bm25_retriever(vectorstore, k=candidates, where=where)
+    search_kwargs = {"k": candidates}
+    if where:
+        search_kwargs["filter"] = where
     dense = _MonthNormalizedRetriever(
-        base=vectorstore.as_retriever(search_kwargs={"k": candidates})
+        base=vectorstore.as_retriever(search_kwargs=search_kwargs)
     )
     fused = EnsembleRetriever(retrievers=[bm25, dense], weights=[0.5, 0.5])
     return _TopKRetriever(base=fused, k=k)
