@@ -29,6 +29,10 @@ if not SECRET_KEY:
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o]
+if DEBUG:
+    # The Vite dev server proxies /api to Django and rewrites the Host header, so
+    # Django sees the browser's Origin (port 5173) as foreign unless trusted.
+    CSRF_TRUSTED_ORIGINS += ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",

@@ -144,3 +144,37 @@ class IsolationTests(TempDirs):
         convo = Conversation.objects.get().pk
         self.assertEqual(self.client.delete(f"/api/conversations/{convo}/").status_code, 204)
         self.assertEqual(Message.objects.count(), 0)
+
+
+class RateLimitTests(TempDirs):
+    """Chat and uploads are throttled per user (the limits are lowered for the test)."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+
+        cache.clear()
+        patcher = mock.patch(
+            "rest_framework.throttling.ScopedRateThrottle.THROTTLE_RATES", {"chat": "2/min", "upload": "2/hour"}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(cache.clear)
+
+    def test_chat_is_rate_limited_per_user(self):
+        def ask(client):
+            return client.post("/api/chat/", {"question": "hi"}, content_type="application/json")
+
+        with mock.patch.object(rag, "get_llm", return_value=fake_llm()):
+            self.assertEqual(ask(self.client).status_code, 200)
+            self.assertEqual(ask(self.client).status_code, 200)
+            self.assertEqual(ask(self.client).status_code, 429)
+            # another user has their own allowance
+            self.client.force_login(self.bob)
+            self.assertEqual(ask(self.client).status_code, 200)
+
+    def test_uploads_are_rate_limited(self):
+        from documents.tests import upload
+
+        codes = [self.client.post("/api/documents/", {"file": upload(f"n{i}.txt", b"x")}).status_code for i in range(3)]
+        self.assertEqual(codes, [400, 400, 429])
