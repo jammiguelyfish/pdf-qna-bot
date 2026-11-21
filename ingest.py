@@ -1,91 +1,62 @@
-"""
-PDF Ingestion Script
-Loads PDFs from data/pdfs/, chunks them, generates embeddings, and stores in Chroma.
-"""
+"""PDF ingestion CLI.
 
+Makes the vector index match the PDFs in data/pdfs/, doing only the work that
+is needed: new files are added, edited files replace their old chunks, deleted
+files are removed, identical copies are skipped, and a run that was interrupted
+simply picks up where it stopped. See ingestion.py for how.
+"""
+import argparse
 import os
-from langchain_community.document_loaders import PyPDFDirectoryLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+import sys
 
-# Configuration
+from ingestion import sync_directory
+from store import open_store
+
 PDF_DIR = "./data/pdfs"
 CHROMA_DIR = "./chroma_db"
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
-def main():
-    """
-    Main ingestion pipeline:
-    1. Load PDFs from directory
-    2. Split into chunks
-    3. Generate embeddings
-    4. Store in Chroma vector database
-    """
-    
-    # Check if PDF directory exists
-    if not os.path.exists(PDF_DIR):
-        print(f"Error: PDF directory '{PDF_DIR}' does not exist.")
-        return
-    
-    # Check if there are any PDFs
-    pdf_files = [f for f in os.listdir(PDF_DIR) if f.endswith('.pdf')]
-    if not pdf_files:
-        print(f"No PDF files found in '{PDF_DIR}'. Please add PDFs first.")
-        return
-    
-    print(f"Found {len(pdf_files)} PDF(s): {', '.join(pdf_files)}")
-    print("\nLoading PDFs...")
-    
-    # Load all PDFs from directory
-    loader = PyPDFDirectoryLoader(PDF_DIR)
-    documents = loader.load()
-    
-    print(f"Loaded {len(documents)} page(s) from PDF(s)")
-    
-    # Split documents into chunks
-    print("\nSplitting documents into chunks...")
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        length_function=len,
-    )
-    chunks = text_splitter.split_documents(documents)
-    
-    print(f"Created {len(chunks)} chunks")
-    
-    # Initialize embeddings model
-    print(f"\nInitializing embeddings model ({EMBEDDING_MODEL})...")
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
-    
-    print("Embeddings model loaded")
-    
-    # Create or update Chroma vector store
-    print(f"\nCreating/updating Chroma vector database at '{CHROMA_DIR}'...")
-    
-    # If Chroma DB already exists, delete it to start fresh
-    if os.path.exists(CHROMA_DIR):
-        import shutil
-        shutil.rmtree(CHROMA_DIR)
-        print("   (Removed existing database)")
-    
-    # Create new vector store
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=CHROMA_DIR
-    )
-    
-    print("Vector database created and persisted")
-    print(f"\nIngestion complete! Processed {len(pdf_files)} PDF(s) into {len(chunks)} searchable chunks.")
+def print_report(report) -> None:
+    def show(label, names):
+        if names:
+            print(f"  {label}: {', '.join(names)}")
+
+    show("added", report.added)
+    show("updated (new content, old chunks replaced)", report.updated)
+    show("re-indexed (was incomplete or used another model)", report.reindexed)
+    show("removed (no longer in the folder)", report.removed)
+    show("unchanged", report.unchanged)
+    for name, same_as in report.duplicates:
+        print(f"  skipped duplicate: {name} has the same content as {same_as}")
+    for name, reason in report.failed:
+        print(f"  FAILED: {name}: {reason}")
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Index PDFs for the Q&A bot")
+    parser.add_argument("--pdf-dir", default=PDF_DIR)
+    parser.add_argument("--db-dir", default=CHROMA_DIR)
+    args = parser.parse_args(argv)
+
+    if not os.path.isdir(args.pdf_dir):
+        print(f"Error: PDF directory '{args.pdf_dir}' does not exist.")
+        return 1
+    if not any(f.lower().endswith(".pdf") for f in os.listdir(args.pdf_dir)):
+        print(f"No PDF files found in '{args.pdf_dir}'. Please add PDFs first.")
+        return 1
+
+    print("Loading embedding model and opening the index...")
+    store = open_store(args.db_dir)
+    print(f"Syncing '{args.pdf_dir}' with '{args.db_dir}'...\n")
+    report = sync_directory(store, args.pdf_dir)
+    print_report(report)
+
+    chunks = len(store.get()["ids"])
+    print(f"\nDone. The index holds {chunks} searchable chunks.")
+    if not report.ok:
+        print(f"{len(report.failed)} file(s) failed; fix them and run again.")
+    return 0 if report.ok else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
