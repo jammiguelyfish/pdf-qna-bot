@@ -22,7 +22,7 @@ jobs:
       - name: Install test dependencies
         run: >
           pip install "numpy<2" langchain==0.1.0 langchain-community==0.0.10 chromadb==0.4.22
-          rank-bm25==0.2.2 pypdf==3.17.4 "Django>=5.2,<5.3" "djangorestframework>=3.15,<3.17" pytest
+          rank-bm25==0.2.2 pypdf==3.17.4 "Django>=5.2,<5.3" "djangorestframework>=3.15,<3.17" "whitenoise>=6.7,<7" pytest
       - name: Compile all modules
         run: python -m compileall -q .
       - name: Migrations are up to date
@@ -47,3 +47,10 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image builds
+        run: docker build -t pdf-qna-bot .
