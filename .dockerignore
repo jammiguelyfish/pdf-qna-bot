@@ -1,0 +1,11 @@
+.git
+.github
+venv
+var
+chroma_db
+**/__pycache__
+**/node_modules
+frontend/dist
+docs
+data
+*.sqlite3

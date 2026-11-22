@@ -8,6 +8,9 @@ code runs in development and in a container.
     DJANGO_ALLOWED_HOSTS       comma-separated, default localhost,127.0.0.1
     ALLOW_REGISTRATION=0       turn off public sign-up
     LLM_MODEL, OLLAMA_BASE_URL which Ollama model answers questions
+    COOKIE_SECURE=0            allow session cookies over plain http (local trial only)
+    TRUST_PROXY_SSL=1          trust X-Forwarded-Proto from a TLS-terminating proxy
+    FRONTEND_DIST              folder with the built React app (set in the Docker image)
 """
 import os
 import sys
@@ -49,6 +52,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -86,6 +90,13 @@ DATABASES = {
 MEDIA_ROOT = VAR_DIR / "uploads"
 VECTOR_DIR = VAR_DIR / "chroma"
 STATIC_URL = "static/"
+STATIC_ROOT = VAR_DIR / "static"
+
+# The built React app. When set (as in the Docker image) Django serves it, so one
+# process handles both the UI and the API and they share an origin.
+FRONTEND_DIST = Path(os.environ["FRONTEND_DIST"]) if os.environ.get("FRONTEND_DIST") else None
+if FRONTEND_DIST:
+    WHITENOISE_ROOT = FRONTEND_DIST
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -99,9 +110,11 @@ AUTH_PASSWORD_VALIDATORS = [
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
-if not (DEBUG or TESTING):
+if not (DEBUG or TESTING) and os.environ.get("COOKIE_SECURE", "1") == "1":
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+if os.environ.get("TRUST_PROXY_SSL") == "1":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],

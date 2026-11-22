@@ -77,6 +77,22 @@ Open http://localhost:5173, create an account, upload a PDF, and ask a question.
 
 > Outside development set `DJANGO_SECRET_KEY` (the server refuses to start without it) and `DJANGO_ALLOWED_HOSTS`. Set `ALLOW_REGISTRATION=0` to close sign-up.
 
+## Deploy with Docker
+
+One image holds the Django API and the built React app (served by WhiteNoise), so there is a single origin and nothing extra to host. Compose adds Ollama and downloads the model.
+
+```bash
+cp .env.example .env        # set DJANGO_SECRET_KEY (see the comment inside)
+docker compose up --build   # first run downloads the model; open http://localhost:8000
+```
+
+- **Data** (database, uploaded PDFs, vector index) lives in the `app-data` volume, models in `ollama-models`. Both survive restarts and rebuilds.
+- **Embedding model** is baked into the image, so the app container starts without internet.
+- **Health check** at `/healthz/`; the container runs as a non-root user.
+- **HTTPS:** put a TLS proxy (Caddy, nginx, a cloud load balancer) in front, then set `COOKIE_SECURE=1`, `TRUST_PROXY_SSL=1`, `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS=https://your.host`. Also raise the proxy's upload limit to at least `MAX_UPLOAD_MB`.
+- **One gunicorn worker** on purpose: indexing runs on an in-process thread. Requests are handled by 8 threads.
+- Ollama runs on CPU in this compose file. For a GPU, add the `deploy.resources.reservations.devices` block to the `ollama` service.
+
 ## How uploads behave
 
 Ingestion is idempotent and restartable. Every stored chunk carries the file's content hash, how many chunks the file produced, and the embedding model used, so the index can always tell what is complete.
@@ -207,7 +223,7 @@ The ingestion and API tests run against a real Chroma index in a temporary direc
 - **Text PDFs only.** Scanned PDFs are rejected with an explanation; there is no OCR.
 - **The keyword index is rebuilt for every question** from the user's chunks. Fine for a few documents, wasteful for thousands.
 - **Sign-in has no lockout** beyond password validation; chat and upload are rate limited but login attempts are not.
-- **No production deployment config** (container, static file serving, HTTPS) is included yet. The Django dev server and the Vite dev server are what I ran.
+- The Docker setup is tested locally (image build, login, upload, chat), but not load-tested or deployed to a public host. TLS is left to a reverse proxy.
 - **Answer quality depends on the model.** A 1.5B model is quick but sometimes wrong, as the evaluation shows.
 - Uploads are limited by the Django process, not a reverse proxy; put one in front for real deployments.
 
