@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/jammiguelyfish/pdf-qna-bot/actions/workflows/ci.yml)
 
+**[Try the live demo](https://jammiguelyfish.github.io/pdf-qna-bot/)** (runs in your browser; see [the demo](#the-live-demo) for what is real)
+
 A full-stack, fully local app for asking questions about your own PDFs. Sign up, upload documents, and chat with them. Answers come only from *your* documents, with the file and page they came from.
 
 - **Backend:** Django + Django REST Framework, session auth, SQLite
@@ -92,6 +94,18 @@ docker compose up --build   # first run downloads the model; open http://localho
 - **HTTPS:** put a TLS proxy (Caddy, nginx, a cloud load balancer) in front, then set `COOKIE_SECURE=1`, `TRUST_PROXY_SSL=1`, `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS=https://your.host`. Also raise the proxy's upload limit to at least `MAX_UPLOAD_MB`.
 - **One gunicorn worker** on purpose: indexing runs on an in-process thread. Requests are handled by 8 threads.
 - Ollama runs on CPU in this compose file. For a GPU, add the `deploy.resources.reservations.devices` block to the `ollama` service.
+
+## The live demo
+
+The [GitHub Pages demo](https://jammiguelyfish.github.io/pdf-qna-bot/) is the same React app with a small backend written in TypeScript that runs in the browser, because a free static host cannot run Django or a language model.
+
+| Real in the demo | Not in the demo |
+| --- | --- |
+| Upload checks: PDF header, SHA-256 duplicate detection, same-name warning and Replace | Reading PDFs you upload: they are checked but not searchable |
+| Searching only the documents that are currently ready (delete or replace one and it drops out) | A language model: answers to the 5 suggested questions were **recorded** from the real pipeline; any other question returns the best-matching passages (BM25) |
+| The three sample PDFs, chunked by the real ingestion code | Accounts and persistence (state resets on reload) |
+
+The data is produced by `python scripts/export_demo.py --answers` (needs Ollama). A `VITE_DEMO=1` build swaps the API client for the in-browser backend (`frontend/src/demo/`); the workflow `.github/workflows/pages.yml` publishes it on every change to `frontend/`.
 
 ## How uploads behave
 
@@ -235,6 +249,8 @@ accounts/               sign-up, sign-in, CSRF
 documents/              upload API, background indexing, per-user collections
 chat/                   conversations, retrieval-augmented answers
 frontend/               React app (documents page, chat page, auth)
+frontend/src/demo/      in-browser backend for the GitHub Pages demo
+scripts/                export_demo.py builds the demo data
 ingestion.py            incremental, restartable PDF indexing (shared)
 store.py                opening the Chroma index (shared)
 retrieval.py            hybrid (embeddings + BM25) retriever (shared)

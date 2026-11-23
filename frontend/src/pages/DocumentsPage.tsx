@@ -1,5 +1,6 @@
 import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, Doc, DocStatus, api } from "../api";
+import { ApiError, DEMO, Doc, DocStatus, api } from "../api";
+import { sampleFiles } from "../demo/demoApi";
 
 interface Notice {
   id: number;
@@ -142,6 +143,22 @@ export default function DocumentsPage() {
           PDFs with selectable text, up to 25 MB each. Your documents are private to your account.
         </p>
         {uploading > 0 && <p className="text-sm text-brand-700 mt-2">Uploading…</p>}
+        {DEMO && (
+          <p className="text-xs text-slate-600 mt-3">
+            Try the warnings: download a sample, then upload it again (renamed or not) to get the duplicate notice.
+            Uploaded files are checked but not read in this demo; search covers the samples only.
+            <span className="block mt-1">
+              {sampleFiles.map((f, i) => (
+                <span key={f.name}>
+                  {i > 0 && " · "}
+                  <a className="underline text-brand-700" href={f.url} download>
+                    {f.name}
+                  </a>
+                </span>
+              ))}
+            </span>
+          </p>
+        )}
       </div>
 
       {notices.map((n) => (
