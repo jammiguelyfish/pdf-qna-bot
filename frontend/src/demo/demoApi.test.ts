@@ -1,3 +1,5 @@
+// @vitest-environment node
+// (the backend uses Web Crypto and Blob, which Node provides natively)
 import { describe, expect, it } from "vitest";
 import { demoApi, demoQuestions } from "./demoApi";
 

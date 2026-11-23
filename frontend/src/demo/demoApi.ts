@@ -58,14 +58,15 @@ function publicDoc(d: StoredDoc): Doc {
   return { ...rest };
 }
 
-// FileReader rather than Blob.arrayBuffer(): works in every browser and under jsdom.
-const readBuffer = (blob: Blob) =>
-  new Promise<ArrayBuffer>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as ArrayBuffer);
-    r.onerror = () => reject(r.error);
-    r.readAsArrayBuffer(blob);
-  });
+const readBuffer = (blob: Blob): Promise<ArrayBuffer> =>
+  typeof blob.arrayBuffer === "function"
+    ? blob.arrayBuffer()
+    : new Promise<ArrayBuffer>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result as ArrayBuffer);
+      r.onerror = () => reject(r.error);
+      r.readAsArrayBuffer(blob);
+    });
 
 async function sha256(file: File): Promise<string> {
   const buf = await readBuffer(file);
