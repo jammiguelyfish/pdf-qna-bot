@@ -262,4 +262,4 @@ data/pdfs/              three sample itineraries used in the evaluation
 
 ## License
 
-This project uses open-source components. Check individual library licenses for details.
+Released under the [MIT License](LICENSE). The libraries it uses keep their own licenses.
