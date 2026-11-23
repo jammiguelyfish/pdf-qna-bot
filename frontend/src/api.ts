@@ -1,59 +1,12 @@
 // Thin client for the Django API. Authentication is a session cookie, so every
 // write must also send Django's CSRF token back in a header.
 
-export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-    public code?: string,
-    public body?: any
-  ) {
-    super(message);
-  }
-}
+import { ApiError, ConversationDetail, ConversationSummary, Doc, Message, Source, User } from "./apiTypes";
+import { demoApi } from "./demo/demoApi";
 
-export interface User {
-  id: number;
-  username: string;
-}
+export * from "./apiTypes";
 
-export type DocStatus = "queued" | "processing" | "ready" | "failed";
-
-export interface Doc {
-  id: number;
-  name: string;
-  size: number;
-  status: DocStatus;
-  error: string;
-  pages: number | null;
-  chunk_count: number;
-  uploaded_at: string;
-}
-
-export interface Source {
-  document_id: number | null;
-  document: string;
-  page: number | null;
-  snippet: string;
-}
-
-export interface Message {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  sources: Source[];
-  created_at: string;
-}
-
-export interface ConversationSummary {
-  id: number;
-  title: string;
-  updated_at: string;
-}
-
-export interface ConversationDetail extends ConversationSummary {
-  messages: Message[];
-}
+export const DEMO = import.meta.env.VITE_DEMO === "1";
 
 function cookie(name: string): string {
   const match = document.cookie.split("; ").find((c) => c.startsWith(name + "="));
@@ -97,7 +50,7 @@ async function request<T>(method: string, path: string, body?: unknown, form?: F
   return data as T;
 }
 
-export const api = {
+const realApi = {
   me: () => request<User>("GET", "/api/auth/me/"),
   login: (username: string, password: string) => request<User>("POST", "/api/auth/login/", { username, password }),
   register: (username: string, password: string) =>
@@ -122,3 +75,6 @@ export const api = {
       conversation,
     }),
 };
+
+// The static GitHub Pages build swaps in a backend that runs in the browser.
+export const api: typeof realApi = DEMO ? demoApi : realApi;

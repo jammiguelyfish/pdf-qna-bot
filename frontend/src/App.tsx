@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { ApiError, User, api } from "./api";
+import { ApiError, DEMO, User, api } from "./api";
 import AuthPage from "./pages/AuthPage";
 import ChatPage from "./pages/ChatPage";
 import DocumentsPage from "./pages/DocumentsPage";
@@ -26,6 +26,20 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col">
+      {DEMO && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-sm px-4 py-2 text-center">
+          Live demo: runs entirely in your browser, with no server and no language model. Duplicate and name checks are
+          real; answers to the suggested questions were recorded from the real app.{" "}
+          <a
+            className="underline font-medium"
+            href="https://github.com/jammiguelyfish/pdf-qna-bot#deploy-with-docker"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Run the full app
+          </a>
+        </div>
+      )}
       <header className="bg-white border-b">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-6">
           <span className="text-lg font-semibold text-brand-700">PDF Q&amp;A</span>
@@ -39,12 +53,14 @@ export default function App() {
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm text-slate-600">
             <span>{user.username}</span>
-            <button
-              className="border rounded px-2 py-1 hover:bg-slate-50"
-              onClick={() => api.logout().finally(() => setUser(null))}
-            >
-              Sign out
-            </button>
+            {!DEMO && (
+              <button
+                className="border rounded px-2 py-1 hover:bg-slate-50"
+                onClick={() => api.logout().finally(() => setUser(null))}
+              >
+                Sign out
+              </button>
+            )}
           </div>
         </div>
       </header>

@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ConversationSummary, Message, Source, api } from "../api";
+import { ConversationSummary, DEMO, Message, Source, api } from "../api";
+import { demoQuestions } from "../demo/demoApi";
 
 function SourceList({ sources }: { sources: Source[] }) {
   const [open, setOpen] = useState<number | null>(null);
@@ -67,9 +68,13 @@ export default function ChatPage() {
     loadConvos();
   }
 
-  async function send(e: FormEvent) {
+  function send(e: FormEvent) {
     e.preventDefault();
-    const text = question.trim();
+    return submit(question);
+  }
+
+  async function submit(raw: string) {
+    const text = raw.trim();
     if (!text || sending) return;
     setSending(true);
     setError("");
@@ -129,6 +134,19 @@ export default function ChatPage() {
           {messages.length === 0 && (
             <div className="text-center text-slate-500 mt-12 space-y-2">
               <p>Ask a question about your documents.</p>
+              {DEMO && (
+                <div className="flex flex-wrap justify-center gap-2 pt-2" aria-label="Suggested questions">
+                  {demoQuestions.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => submit(q)}
+                      className="text-sm border rounded-full px-3 py-1 bg-white text-slate-700 hover:bg-brand-50"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
               {hasReady === false && (
                 <p className="text-sm">
                   You have no processed documents yet.{" "}
