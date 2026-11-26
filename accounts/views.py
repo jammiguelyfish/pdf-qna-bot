@@ -7,6 +7,7 @@ X-CSRFToken header, as for every other write.
 import json
 
 from django.conf import settings
+from django.core.cache import cache
 from django.contrib.auth import authenticate, get_user_model, login, logout, password_validation
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
@@ -69,14 +70,44 @@ def register(request):
     return JsonResponse(_user_json(user), status=201)
 
 
+def _client_ip(request) -> str:
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _login_keys(request, username: str):
+    """Failure counters: one per (address, username), one per address."""
+    ip = _client_ip(request)
+    return (
+        (f"login-fail:{ip}:{username.lower()}", settings.LOGIN_MAX_FAILURES),
+        (f"login-fail-ip:{ip}", settings.LOGIN_MAX_FAILURES_PER_IP),
+    )
+
+
+def _record_failure(key: str):
+    # add() starts the window on the first failure; later failures do not extend it
+    if cache.add(key, 1, settings.LOGIN_LOCKOUT_SECONDS):
+        return
+    try:
+        cache.incr(key)
+    except ValueError:  # expired between add and incr
+        cache.add(key, 1, settings.LOGIN_LOCKOUT_SECONDS)
+
+
 @require_POST
 def login_view(request):
     data = _body(request)
-    user = authenticate(
-        request, username=str(data.get("username", "")), password=str(data.get("password", ""))
-    )
+    username = str(data.get("username", ""))
+    keys = _login_keys(request, username)
+    if any(cache.get(key, 0) >= limit for key, limit in keys):
+        response = _error("Too many failed sign-in attempts. Try again later.", 429)
+        response["Retry-After"] = str(settings.LOGIN_LOCKOUT_SECONDS)
+        return response
+    user = authenticate(request, username=username, password=str(data.get("password", "")))
     if user is None:
+        for key, _ in keys:
+            _record_failure(key)
         return _error("Wrong username or password.", 401)
+    cache.delete(keys[0][0])
     login(request, user)
     return JsonResponse(_user_json(user))
 

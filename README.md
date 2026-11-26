@@ -131,7 +131,7 @@ Ingestion is idempotent and restartable. Every stored chunk carries the file's c
 - Documents and conversations are looked up through the signed-in user, so another user's id returns `404`, never `403`, and cannot be read, deleted or written into.
 - Files are stored under a random name in a per-user folder; the original filename is only a display label (path components and control characters are stripped).
 - The keyword retriever is the easy place to leak: it is built from the collection's contents, not from a filtered query. It is built from the same user-scoped, ready-only set, and a test asks a question that only another user's document can answer.
-- Passwords use Django's hashers and validators. Writes require a CSRF token; the session cookie is HttpOnly and SameSite=Lax (and Secure outside development).
+- Passwords use Django's hashers and validators, and repeated wrong passwords lock sign-in for a while. Writes require a CSRF token; the session cookie is HttpOnly and SameSite=Lax (and Secure outside development).
 
 ## API
 
@@ -215,6 +215,7 @@ What this shows, and what it doesn't:
 | `LLM_MODEL` / `OLLAMA_BASE_URL` | `mistral` / `http://localhost:11434` | which Ollama model answers |
 | `TOP_K` | `4` | chunks passed to the model |
 | `MAX_UPLOAD_MB` | `25` | per-file limit |
+| `LOGIN_MAX_FAILURES` / `LOGIN_MAX_FAILURES_PER_IP` / `LOGIN_LOCKOUT_MINUTES` | `5` / `30` / `15` | sign-in lockout |
 | `APP_VAR_DIR` | `./var` | database, uploads and vector index |
 
 Chunking (1000 characters, 200 overlap) and the embedding model are constants in `ingestion.py` and `store.py`.
@@ -236,7 +237,7 @@ The ingestion and API tests run against a real Chroma index in a temporary direc
 - **No streaming.** The answer appears when the model finishes.
 - **Text PDFs only.** Scanned PDFs are rejected with an explanation; there is no OCR.
 - **The keyword index is rebuilt for every question** from the user's chunks. Fine for a few documents, wasteful for thousands.
-- **Sign-in has no lockout** beyond password validation; chat and upload are rate limited but login attempts are not.
+- **Sign-in lockout is in memory.** Five wrong passwords for one username from one address (30 for any usernames) block sign-in for 15 minutes. The counters live in the server's cache, so they reset on restart and are not shared between processes; use a shared cache such as Redis for several workers. Behind a proxy, all users share the proxy's address unless it is forwarded.
 - The Docker setup is tested locally (image build, login, upload, chat), but not load-tested or deployed to a public host. TLS is left to a reverse proxy.
 - **Answer quality depends on the model.** A 1.5B model is quick but sometimes wrong, as the evaluation shows.
 - Uploads are limited by the Django process, not a reverse proxy; put one in front for real deployments.
