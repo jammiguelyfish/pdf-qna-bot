@@ -16,6 +16,26 @@ NO_DOCUMENTS = (
 )
 
 
+HISTORY_MESSAGES = 4  # the last two exchanges are enough to resolve "and the next day?"
+MAX_HISTORY_CHARS = 300
+MAX_STANDALONE_CHARS = 300
+
+CONDENSE_PROMPT = """Rewrite the follow-up question so that it can be understood without the conversation.
+
+Rules:
+- Replace pronouns and references ("it", "that day", "the next one") with what they refer to.
+- Keep every name, number and date from the follow-up question.
+- If the follow-up question already makes sense on its own, repeat it unchanged.
+- Do not answer the question. Output only the rewritten question, on one line.
+
+Conversation:
+{history}
+
+Follow-up question: {question}
+
+Rewritten question:"""
+
+
 class LLMUnavailable(Exception):
     """The language model could not be reached or failed to answer."""
 
@@ -47,8 +67,36 @@ def _sources(source_documents) -> list[dict]:
     return out
 
 
-def answer_question(user, question: str, llm=None):
+def _clip(text: str) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= MAX_HISTORY_CHARS else text[: MAX_HISTORY_CHARS - 1] + "…"
+
+
+def standalone_question(llm, history, question: str) -> str:
+    """Rewrite a follow-up so retrieval does not depend on earlier messages.
+
+    ``history`` is a list of ``(role, text)`` pairs, oldest first. With no history
+    the question is returned untouched and the model is not called. If the model
+    returns nothing usable, the original question is used.
+    """
+    if not history:
+        return question
+    lines = "\n".join(
+        f"{'User' if role == 'user' else 'Assistant'}: {_clip(text)}"
+        for role, text in history[-HISTORY_MESSAGES:]
+    )
+    rewritten = str(llm.invoke(CONDENSE_PROMPT.format(history=lines, question=question))).strip()
+    rewritten = rewritten.removeprefix("Rewritten question:").strip().strip('"')
+    if not rewritten or "\n" in rewritten or len(rewritten) > MAX_STANDALONE_CHARS:
+        return question
+    return rewritten
+
+
+def answer_question(user, question: str, llm=None, history=None):
     """Return ``(answer, sources)`` using only ``user``'s ready documents.
+
+    ``history`` (earlier ``(role, text)`` pairs of the conversation) lets a
+    follow-up question be rewritten into one that stands alone before searching.
 
     Isolation is enforced twice: the vector collection is the user's own, and
     both retrievers are further limited to the ids of their ready documents, so
@@ -66,8 +114,10 @@ def answer_question(user, question: str, llm=None):
 
     retriever = build_hybrid_retriever(store, k=settings.TOP_K, where=where)
     try:
-        chain = build_chain(llm or get_llm(), retriever)
-        out = chain.invoke({"query": question})
+        llm = llm or get_llm()
+        query = standalone_question(llm, history or [], question)
+        chain = build_chain(llm, retriever)
+        out = chain.invoke({"query": query})
     except Exception as exc:  # noqa: BLE001 - connection, model-not-found, timeouts...
         log.exception("language model call failed")
         raise LLMUnavailable(str(exc)) from exc

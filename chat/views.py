@@ -41,8 +41,13 @@ class Ask(APIView):
         convo_id = request.data.get("conversation")
         convo = get_object_or_404(request.user.conversations, pk=convo_id) if convo_id else None
 
+        history = (
+            list(convo.messages.order_by("-created_at", "-id").values_list("role", "content")[: rag.HISTORY_MESSAGES])[::-1]
+            if convo
+            else []
+        )
         try:
-            answer, sources = rag.answer_question(request.user, question)
+            answer, sources = rag.answer_question(request.user, question, history=history)
         except rag.LLMUnavailable:
             return Response(
                 {"detail": "The language model isn't reachable right now. Is Ollama running?"},
