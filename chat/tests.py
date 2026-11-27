@@ -1,4 +1,5 @@
 """Chat: answers come only from the asking user's ready documents."""
+from typing import ClassVar
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -15,6 +16,20 @@ User = get_user_model()
 
 def fake_llm(text="Mocked answer."):
     return FakeListLLM(responses=[text] * 50)
+
+
+class RecordingLLM(FakeListLLM):
+    """A scripted model that remembers every prompt it was given."""
+
+    def _call(self, prompt, *args, **kwargs):
+        RecordingLLM.prompts.append(prompt)
+        return super()._call(prompt, *args, **kwargs)
+
+    prompts: ClassVar[list] = []
+
+    @classmethod
+    def condense_prompts(cls):
+        return [p for p in cls.prompts if p.startswith("Rewrite the follow-up")]
 
 
 class ChatTests(TempDirs):
@@ -69,6 +84,78 @@ class ChatTests(TempDirs):
         self.client.logout()
         self.assertEqual(self.ask("hi").status_code, 403)
         self.assertEqual(self.client.get("/api/conversations/").status_code, 403)
+
+
+class FollowUpTests(TempDirs):
+    """A follow-up is rewritten into a standalone question before searching."""
+
+    def ask_recording(self, question, rewrite, **extra):
+        """Ask with a model that rewrites to ``rewrite``; return (response, prompts, query used)."""
+        RecordingLLM.prompts = []
+        llm = RecordingLLM(responses=[rewrite, "Mocked answer."])
+        seen = {}
+        real_chain = rag.build_chain
+
+        def spy(llm_, retriever):
+            chain = real_chain(llm_, retriever)
+
+            class Spy:  # chains are pydantic models, so wrap instead of patching invoke
+                @staticmethod
+                def invoke(inputs, *a, **k):
+                    seen.update(inputs)
+                    return chain.invoke(inputs, *a, **k)
+
+            return Spy
+
+        with mock.patch.object(rag, "get_llm", return_value=llm), mock.patch.object(rag, "build_chain", spy):
+            r = self.client.post("/api/chat/", {"question": question, **extra}, content_type="application/json")
+        return r, RecordingLLM.condense_prompts(), seen.get("query")
+
+    def test_first_question_is_searched_as_typed_without_an_extra_model_call(self):
+        self.post("korea.pdf", pdf_bytes(1))
+        r, prompts, query = self.ask_recording("Where do we land?", "unused")
+        self.assertEqual(query, "Where do we land?")
+        self.assertEqual(prompts, [])
+
+    def test_follow_up_is_rewritten_using_the_earlier_messages(self):
+        self.post("korea.pdf", pdf_bytes(1))
+        convo = self.ask_recording("Where do we land?", "Seoul.")[0].json()["conversation"]["id"]  # first turn: no rewrite, so this is the answer
+        r, prompts, query = self.ask_recording(
+            "And the next day?", "Rewritten question: What do we do the day after landing in Seoul?", conversation=convo
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(query, "What do we do the day after landing in Seoul?")
+        self.assertEqual(len(prompts), 1)
+        self.assertIn("Where do we land?", prompts[0])
+        self.assertIn("Seoul.", prompts[0])
+        # what the user typed is what gets saved and shown
+        self.assertEqual(r.json()["messages"][0]["content"], "And the next day?")
+
+    def test_unusable_rewrites_fall_back_to_the_original_question(self):
+        history = [("user", "Where do we land?"), ("assistant", "Seoul.")]
+        for bad in ["", "   ", "line one\nline two", "x" * 500]:
+            llm = FakeListLLM(responses=[bad])
+            self.assertEqual(rag.standalone_question(llm, history, "And then?"), "And then?", repr(bad[:10]))
+
+    def test_only_the_most_recent_messages_and_clipped_text_are_sent(self):
+        history = [("user", f"question {i}") for i in range(10)] + [("assistant", "long " * 500)]
+        RecordingLLM.prompts = []
+        rag.standalone_question(RecordingLLM(responses=["ok"]), history, "and then?")
+        seen = RecordingLLM.condense_prompts()
+        self.assertNotIn("question 5", seen[0])
+        self.assertIn("question 8", seen[0])
+        self.assertLess(len(seen[0]), len(rag.CONDENSE_PROMPT) + 4 * 320 + 100)
+
+    def test_another_users_conversation_history_is_never_used(self):
+        self.post("korea.pdf", pdf_bytes(1))
+        convo = self.ask_recording("Secret question?", "unused")[0].json()["conversation"]["id"]
+        self.client.logout()
+        other = User.objects.create_user("zed", password="a-long-passphrase-9")
+        self.client.force_login(other)
+        r = self.client.post(
+            "/api/chat/", {"question": "hi", "conversation": convo}, content_type="application/json"
+        )
+        self.assertEqual(r.status_code, 404)
 
 
 class IsolationTests(TempDirs):

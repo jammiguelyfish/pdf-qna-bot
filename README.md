@@ -233,7 +233,7 @@ The ingestion and API tests run against a real Chroma index in a temporary direc
 ## Limitations
 
 - **One server process.** Indexing runs on a single background thread, and unfinished documents are re-queued on the next request after a restart. For several workers or servers, use a real queue (Celery or RQ) and a server-based vector store.
-- **Answers are single-turn.** Conversations are saved and shown, but earlier messages are not sent to the model, so a follow-up like "and the next day?" has no context.
+- **Follow-ups are rewritten, not remembered.** For the second and later questions in a conversation, the model first rewrites the question into one that stands alone, using the last two exchanges ("and the hotel there?" becomes "What hotel are we staying at in Busan?"), and that is what gets searched. The model never sees earlier answers when it writes the final reply. This costs one extra model call per follow-up. A small model sometimes leaves a reference unresolved (a 1.5B model did not resolve "the next day" in a spot check); if the rewrite is empty, multi-line or long, the original question is used.
 - **No streaming.** The answer appears when the model finishes.
 - **Text PDFs only.** Scanned PDFs are rejected with an explanation; there is no OCR.
 - **The keyword index is rebuilt for every question** from the user's chunks. Fine for a few documents, wasteful for thousands.
