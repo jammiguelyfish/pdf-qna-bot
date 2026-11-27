@@ -124,6 +124,12 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {"chat": "60/min", "upload": "60/hour"},
 }
 
+# Sign-in lockout: after this many wrong passwords from one address for one username
+# (or from one address for any usernames), sign-in is refused for the lockout period.
+LOGIN_MAX_FAILURES = int(os.environ.get("LOGIN_MAX_FAILURES", "5"))
+LOGIN_MAX_FAILURES_PER_IP = int(os.environ.get("LOGIN_MAX_FAILURES_PER_IP", "30"))
+LOGIN_LOCKOUT_SECONDS = int(os.environ.get("LOGIN_LOCKOUT_MINUTES", "15")) * 60
+
 ALLOW_REGISTRATION = os.environ.get("ALLOW_REGISTRATION", "1") == "1"
 
 # Uploads

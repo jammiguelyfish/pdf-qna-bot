@@ -1,6 +1,7 @@
 import json
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 
 User = get_user_model()
@@ -59,3 +60,49 @@ class AuthTests(TestCase):
         self.assertEqual(r.status_code, 401)
         r = c.post("/api/auth/register/", "[1, 2]", content_type="application/json")
         self.assertEqual(r.status_code, 400)
+
+
+@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
+class LoginLockoutTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        User.objects.create_user("hana", password="a-long-passphrase-9")
+        User.objects.create_user("ivan", password="a-long-passphrase-9")
+
+    def fail(self, client, name, times):
+        return [post(client, "/api/auth/login/", {"username": name, "password": "nope"}).status_code for _ in range(times)]
+
+    def test_repeated_failures_lock_that_username_out_even_with_the_right_password(self):
+        c = Client()
+        self.assertEqual(self.fail(c, "hana", 5), [401] * 5)
+        r = post(c, "/api/auth/login/", {"username": "hana", "password": "a-long-passphrase-9"})
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(r["Retry-After"], "900")
+
+    def test_lockout_is_per_username_and_case_insensitive(self):
+        c = Client()
+        self.fail(c, "Hana", 5)
+        self.assertEqual(post(c, "/api/auth/login/", {"username": "HANA", "password": "a-long-passphrase-9"}).status_code, 429)
+        self.assertEqual(post(c, "/api/auth/login/", {"username": "ivan", "password": "a-long-passphrase-9"}).status_code, 200)
+
+    def test_a_successful_sign_in_resets_the_count(self):
+        c = Client()
+        self.fail(c, "hana", 4)
+        self.assertEqual(post(c, "/api/auth/login/", {"username": "hana", "password": "a-long-passphrase-9"}).status_code, 200)
+        self.assertEqual(self.fail(c, "hana", 4), [401] * 4, "the earlier failures no longer count")
+
+    def test_trying_many_usernames_from_one_address_is_also_limited(self):
+        with override_settings(LOGIN_MAX_FAILURES_PER_IP=6):
+            c = Client()
+            codes = [post(c, "/api/auth/login/", {"username": f"user{i}", "password": "x"}).status_code for i in range(7)]
+            self.assertEqual(codes, [401] * 6 + [429])
+
+    def test_lockout_ends_when_the_window_passes(self):
+        c = Client()
+        with override_settings(LOGIN_LOCKOUT_SECONDS=2):
+            self.fail(c, "hana", 5)
+            self.assertEqual(post(c, "/api/auth/login/", {"username": "hana", "password": "a-long-passphrase-9"}).status_code, 429)
+            import time
+            time.sleep(2.2)
+            self.assertEqual(post(c, "/api/auth/login/", {"username": "hana", "password": "a-long-passphrase-9"}).status_code, 200)
